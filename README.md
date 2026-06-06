@@ -4,10 +4,14 @@ Ready-to-run, **iOS 17+/26-valid** [AltServer-Linux](https://github.com/NyaMisty
 as GHCR container images — plus the full, reproducible build chain behind them.
 
 This builds on NyaMisty's AltServer-Linux (which brought AltStore-style
-sideloading to Linux). It adds the two things current iOS needs: a codesigning
-path that today's AMFI accepts, and a self-hosted build chain so the whole thing
-stays buildable as its dependencies move. Full credit for the engine stays with
-the upstream authors — see [Credits](#credits).
+sideloading to Linux) and modernises it on three fronts: a codesigning path
+today's AMFI accepts, a **corecrypto-free** GrandSlam auth path (Apple's crypto
+swapped for the clean-room, OpenSSL-based
+[libgsa](https://github.com/dragoshont/libgsa)), and a fully self-hosted build
+chain so the whole thing stays buildable as its dependencies move. As far as we
+know it's the first AltServer-Linux build that fetches, links, and ships **zero
+Apple source**. Full credit for the engine stays with the upstream authors — see
+[Credits](#credits).
 
 ---
 
@@ -114,7 +118,7 @@ reproducibility hole is closed, and every input is pinned by a normal git SHA.
 | libzip | `v1.8.0` (`26ba5523…`) | matches the original toolchain |
 | libgsa | `ebb2919…` | corecrypto-free GrandSlam crypto (OpenSSL/LibreSSL) |
 | zsign | `fe1750d` (PR #391) | the Code=85 fix |
-| AltServer-Linux | `6d1d2ca…` | master + AltSign repoint + libgsa link |
+| AltServer-Linux | `970efba…` | master + AltSign repoint + libgsa link |
 | AltSign-Linux | `9a0d70a…` | corecrypto → libgsa port |
 
 ## Build
