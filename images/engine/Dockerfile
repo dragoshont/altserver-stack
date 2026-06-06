@@ -30,7 +30,7 @@
 # AND inside this Alpine image.
 
 # BUILDER_IMAGE is the AltServer-Linux build toolchain (Alpine 3.15 + Boost +
-# static corecrypto/cpprestsdk/libzip). Vendored from NyaMisty/AltServer-Linux//
+# static libgsa/cpprestsdk/libzip). Vendored from NyaMisty/AltServer-Linux//
 # buildenv into images/builder/ and published by the build-builder workflow, so
 # the engine build no longer depends on any NyaMisty-owned artifact. Override to
 # nyamisty's image only for emergency builds.
@@ -88,9 +88,10 @@ FROM ${BUILDER_IMAGE} AS altserver-build
 
 # dragoshont/AltServer-Linux is our fork of NyaMisty/AltServer-Linux. The pinned
 # SHA is master + the .gitmodules repoint that swaps the AltSign submodule URL to
-# dragoshont/AltSign-Linux, so `submodule update` never touches NyaMisty.
+# dragoshont/AltSign-Linux (now the libgsa port), so `submodule update` never
+# touches NyaMisty and the signer's GrandSlam auth links libgsa, not corecrypto.
 ARG ALTSERVER_REPO=https://github.com/dragoshont/AltServer-Linux
-ARG ALTSERVER_REF=9282aff21cb7c22a058e761172fd7f51698d033d
+ARG ALTSERVER_REF=6d1d2ca9f97abc3e85022ce7788d332f3e1215ac
 
 RUN apk add --no-cache git make g++ python3
 

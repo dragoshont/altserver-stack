@@ -1,7 +1,7 @@
 name: build-builder
 
 # Builds the vendored AltServer-Linux build toolchain (Alpine 3.15 + Boost +
-# static corecrypto/cpprestsdk/libzip) and publishes it to GHCR as
+# static libgsa/cpprestsdk/libzip) and publishes it to GHCR as
 # ghcr.io/<owner>/altserver-builder-alpine-amd64.
 #
 # This image is the `altserver-build` stage base (BUILDER_IMAGE) for
@@ -32,10 +32,10 @@ on:
         description: 'libzip git ref (SHA/tag) — override to test a dep bump'
         required: false
         default: '26ba5523db09213f532821875542dba7afa04b65'
-      corecrypto_sha256:
-        description: 'Expected SHA256 of corecrypto.zip (empty = skip integrity check)'
+      libgsa_ref:
+        description: 'libgsa git ref (SHA/tag) — override to test a crypto bump'
         required: false
-        default: 'b0f72ee1235ba791c302922c28be141a4806f7e13d1a1958a51f139d35ad64a9'
+        default: 'ebb29197872c4a3a130e1400d1a6451baee0424a'
   push:
     branches: [main]
     paths:
@@ -84,6 +84,6 @@ jobs:
             IMAGE=amd64/alpine:3.15
             CPPRESTSDK_REF=${{ github.event.inputs.cpprestsdk_ref || '122d09549201da5383321d870bed45ecb9e168c5' }}
             LIBZIP_REF=${{ github.event.inputs.libzip_ref || '26ba5523db09213f532821875542dba7afa04b65' }}
-            CORECRYPTO_SHA256=${{ github.event.inputs.corecrypto_sha256 || 'b0f72ee1235ba791c302922c28be141a4806f7e13d1a1958a51f139d35ad64a9' }}
+            LIBGSA_REF=${{ github.event.inputs.libgsa_ref || 'ebb29197872c4a3a130e1400d1a6451baee0424a' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

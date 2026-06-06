@@ -45,7 +45,7 @@ Two images on GitHub Container Registry:
 | Image | What it is |
 | --- | --- |
 | `ghcr.io/dragoshont/altserver-linux` | **The engine.** `AltServer` + patched `zsign`, fully-static (musl) binaries. Run it directly or extract the binaries onto a host. |
-| `ghcr.io/dragoshont/altserver-builder-alpine-amd64` | **The build toolchain.** Alpine 3.15 + Boost + static corecrypto/cpprestsdk/libzip. Only needed to *build* the engine. |
+| `ghcr.io/dragoshont/altserver-builder-alpine-amd64` | **The build toolchain.** Alpine 3.15 + Boost + static libgsa/cpprestsdk/libzip. Only needed to *build* the engine. |
 
 Both are `linux/amd64`.
 
@@ -88,22 +88,23 @@ into our own CI. The result reproduces the engine **bit-for-bit** identical to a
 build against the original toolchain — evidence the vendoring is a faithful copy,
 not a rewrite.
 
-## corecrypto: the one true reproducibility hole
+## libgsa: corecrypto is gone
 
-The only dependency that can't be pinned by a normal version handle is Apple's
-**corecrypto**, fetched live from `developer.apple.com`. Apple silently revs it,
-and the layout drifts. This repo's builder absorbs those breakages explicitly:
+The original build's one un-pinnable input was Apple's **corecrypto**, fetched
+live from `developer.apple.com` under a no-redistribution license, with a layout
+that silently drifted between Apple drops. AltServer-Linux only ever used
+corecrypto for one thing: the **GrandSlam (Apple ID) SRP-6a + AES/HMAC/PBKDF2**
+handshake in `AltSign-Linux/Sources/.../AppleAPI+Authentication.cpp`.
 
-| Symptom | Cause | Fix in `images/builder/Dockerfile` |
-| --- | --- | --- |
-| zip extracts to `corecrypto-2024/` not `corecrypto/` | Apple renamed the top-level dir | normalize whatever dir ships into a stable `corecrypto/` by locating its `CMakeLists.txt` |
-| `could not find scripts/code-coverage.cmake` | Apple references a StableCoder helper it doesn't ship (default-off `CODE_COVERAGE`) | `sed` out the include + `add/target_code_coverage()` calls |
-| `Cannot find source file: corecrypto_static/ccrng_static.c` | generated sources list a path the zip doesn't ship (file is at tree root) | rewrite the path in `CoreCryptoSources.cmake` |
-| `mode_t unknown` / `__memcpy_chk` undefined | `corecrypto_perf`/`_test` assume glibc/FORTIFY; we're on musl | drop those targets from `CMakeFiles/Makefile2` (they aren't needed) |
+This stack replaces it outright with **[libgsa](https://github.com/dragoshont/libgsa)**,
+a clean-room reimplementation of that exact crypto on **OpenSSL/LibreSSL**. Its
+SRP-6a is validated **byte-for-byte** against the Apple GrandSlam variant via a
+golden-vector oracle. The builder compiles `libgsa.a` from a pinned commit and
+the engine links it (plus the LibreSSL `libssl`/`libcrypto` already on AltServer's
+static link line) instead of `libcorecrypto_static.a`.
 
-The fetched zip is **digest-guarded** (`CORECRYPTO_SHA256`): if Apple ships a
-different artifact the build **fails loudly** instead of silently drifting. Bump
-it deliberately via build-arg / workflow input when adopting a new drop.
+The result: **no Apple source is fetched, linked, or shipped**, the
+reproducibility hole is closed, and every input is pinned by a normal git SHA.
 
 ## Pinned, reproducible deps
 
@@ -111,10 +112,10 @@ it deliberately via build-arg / workflow input when adopting a new drop.
 | --- | --- | --- |
 | cpprestsdk | `v2.10.18` (`122d0954…`) | last working release; EOL but stable |
 | libzip | `v1.8.0` (`26ba5523…`) | matches the original toolchain |
-| corecrypto | digest `b0f72ee1…` | no version handle; SHA256-guarded live fetch |
+| libgsa | `ebb2919…` | corecrypto-free GrandSlam crypto (OpenSSL/LibreSSL) |
 | zsign | `fe1750d` (PR #391) | the Code=85 fix |
-| AltServer-Linux | `9282aff…` | master + AltSign submodule repoint |
-| AltSign-Linux | `0daf107…` | the commit AltServer master pinned |
+| AltServer-Linux | `6d1d2ca…` | master + AltSign repoint + libgsa link |
+| AltSign-Linux | `9a0d70a…` | corecrypto → libgsa port |
 
 ## Build
 
@@ -126,31 +127,20 @@ it deliberately via build-arg / workflow input when adopting a new drop.
 The builder rarely changes; the engine consumes `builder:latest-main` as its
 `BUILDER_IMAGE`. After a builder rebuild, re-run the engine workflow to relink.
 
-### Build locally (clean-room / bring-your-own corecrypto)
+### Build locally (fully clean-room, no Apple fetch)
 
-The published engine image is a convenience build that **statically links
-compiled Apple corecrypto**. If you'd rather be the one who fetches corecrypto
-(and accepts Apple's terms), or you want to avoid this build reaching out to
-Apple at all, build it yourself:
+The engine is **corecrypto-free** — its GrandSlam crypto is libgsa
+(OpenSSL/LibreSSL), so the build never reaches `developer.apple.com` and ships no
+Apple source. Build it yourself with nothing but Docker:
 
 ```bash
 ./build.sh        # builds altserver-builder-alpine-amd64:local + altserver-linux:local
 docker run --rm -v "$PWD/out:/dest" altserver-linux:local extract
 ```
 
-corecrypto acquisition is **check-then-download**, in this order:
-
-1. **Bring your own** — drop your Apple `corecrypto.zip` at
-   `images/builder/vendor/corecrypto.zip` and the build uses it with **no call to
-   `developer.apple.com`**. It's `.gitignored` and never committed.
-2. **Cached** — a BuildKit cache mount keeps the downloaded zip so repeat local
-   builds skip the download.
-3. **Download** — otherwise the builder fetches it from Apple (you thereby accept
-   Apple's corecrypto Internal Use License).
-
-The `CORECRYPTO_SHA256` integrity guard is applied to **all three** paths, so a
-stale, substituted, or BYO zip fails just as loudly as a drifted Apple download.
-
+The builder clones and compiles `libgsa` from `LIBGSA_REF`, installs `libgsa.a`
++ headers, and the engine links them. No download gates, no license prompts, no
+cache mounts.
 
 All pins are overridable build-args / `workflow_dispatch` inputs so you can test
 a dependency bump without editing the Dockerfile.
@@ -164,7 +154,7 @@ a dependency bump without editing the Dockerfile.
 - **Never** bake an Apple ID / password into an image or commit one. Pass them at
   runtime and keep them host-side (a secrets manager / SOPS), never in a web tier.
 - The published images contain **no Apple credentials and no Apple source code** —
-  corecrypto is fetched from Apple at build time and is *not* redistributed here.
+  the GrandSlam auth crypto is libgsa (OpenSSL/LibreSSL), not Apple corecrypto.
 - Free Apple Developer accounts cap sideloading (3 apps / 7-day certificate /
   limited device registrations). A paid account lifts most of these limits.
 
@@ -179,30 +169,19 @@ from them.
 Each upstream license below was checked against its source. None of the *code*
 licenses (AGPL / MIT / BSD / BSL) restrict commercial use — so this project does
 not either. The practical limits on *how you sideload* come from Apple's
-Developer Program agreement (sign your own apps with your own Apple ID), and the
-one genuinely restrictive input is Apple's corecrypto — see the note below.
+Developer Program agreement (sign your own apps with your own Apple ID). With
+corecrypto replaced by libgsa, **every component is open-source licensed** — there
+is no longer any Apple-source dependency.
 
 | Component | License | In the published image? |
 | --- | --- | --- |
 | AltServer-Linux (NyaMisty / AltStore lineage) | AGPL-3.0 | yes — binary |
 | AltSign-Linux (NyaMisty / AltStore lineage) | AGPL-3.0 | yes — binary |
+| libgsa (dragoshont) | MIT | static-linked |
 | zsign (zhlynn, PR #391) | MIT | yes — binary |
 | cpprestsdk (Microsoft) | MIT | static-linked |
 | libzip (nih-at) | BSD-3-Clause | static-linked |
 | Boost | BSL-1.0 | static-linked |
-| Apple corecrypto | **corecrypto Internal Use License** (not redistributable) | **no source** — fetched from Apple at build time |
-
-**About Apple corecrypto.** corecrypto ships under Apple's *corecrypto Internal
-Use License Agreement* (rev EA1833), **not** APSL or any open-source license. It
-grants a 90-day licence to compile and run corecrypto **internally**, on machines
-you own or control, **for the sole purpose of verifying its security
-characteristics**, and **forbids redistribution** of the software or any portion
-of it. This repo therefore never commits or republishes corecrypto source — the
-builder downloads it straight from `developer.apple.com` at build time, and you
-accept Apple's terms when you build. The engine statically links corecrypto,
-exactly as upstream AltServer-Linux does; redistributing the *built* binary is
-your responsibility under Apple's terms, so the safe default is to build/extract
-for your own use rather than republish the engine image.
 
 If you redistribute the AGPL parts (this repo + the pinned forks), the usual
 AGPL-3.0 source-availability obligations apply to your recipients.
@@ -222,5 +201,5 @@ AGPL-3.0 source-availability obligations apply to your recipients.
 ## Lineage
 
 Born out of [`dragoshont/homelab`](https://github.com/dragoshont/homelab), where
-the Code=85 fix and the corecrypto-drift handling were first worked out, then
+the Code=85 fix and the corecrypto→libgsa replacement were first worked out, then
 extracted here so the build chain can be consumed — and improved — independently.
