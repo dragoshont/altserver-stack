@@ -1,0 +1,71 @@
+name: build-engine
+
+# Builds AltServer-Linux (dragoshont fork) with its signing step delegated to a
+# patched zsign (GLESign/zsign @ fe1750d, PR zhlynn/zsign#391) so the produced
+# signatures are valid on iOS 17+/26 Apple Silicon AMFI. Publishes the resulting
+# image (AltServer + zsign static binaries) to GHCR as
+# ghcr.io/<owner>/altserver-linux.
+#
+# Triggered on:
+#   - workflow_dispatch (with explicit tag)
+#   - push to main when images/engine/** changes
+#     (publishes :latest-main + :sha-<sha>)
+#
+# Consumes ghcr.io/<owner>/altserver-builder-alpine-amd64:latest-main as its
+# BUILDER_IMAGE. After a builder rebuild, re-run this to relink the engine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (e.g. v0.0.5-zsign1)'
+        required: true
+        default: 'v0.0.5-zsign1'
+  push:
+    branches: [main]
+    paths:
+      - 'images/engine/**'
+      - '.github/workflows/build-engine.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/altserver-linux
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          tags="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tags="$tags,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
+          else
+            tags="$tags,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-main"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: images/engine
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

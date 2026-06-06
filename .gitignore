@@ -1,0 +1,5 @@
+# Build artifacts / local scratch
+*.zip
+build/
+dist/
+.DS_Store

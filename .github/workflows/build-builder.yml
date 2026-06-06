@@ -1,0 +1,91 @@
+name: build-builder
+
+# Builds the vendored AltServer-Linux build toolchain (Alpine 3.15 + Boost +
+# static corecrypto/cpprestsdk/libzip) and publishes it to GHCR as
+# ghcr.io/<owner>/altserver-builder-alpine-amd64.
+#
+# This image is the `altserver-build` stage base (BUILDER_IMAGE) for
+# images/engine/Dockerfile. It is a hard-fork of the dead
+# ghcr.io/nyamisty/altserver_builder_alpine_amd64 — vendored so the engine build
+# no longer depends on any NyaMisty-owned artifact.
+#
+# Triggered on:
+#   - workflow_dispatch (manual rebuild of the toolchain)
+#   - push to main when images/builder/** changes
+#
+# NOTE: this builds infrequently (toolchain rarely changes). The engine workflow
+# build-engine.yml consumes :latest-main from here as its BUILDER_IMAGE. After a
+# toolchain rebuild, re-run build-engine to relink the engine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (e.g. alpine3.15-1)'
+        required: true
+        default: 'alpine3.15-1'
+      cpprestsdk_ref:
+        description: 'cpprestsdk git ref (SHA/tag) — override to test a dep bump'
+        required: false
+        default: '122d09549201da5383321d870bed45ecb9e168c5'
+      libzip_ref:
+        description: 'libzip git ref (SHA/tag) — override to test a dep bump'
+        required: false
+        default: '26ba5523db09213f532821875542dba7afa04b65'
+      corecrypto_sha256:
+        description: 'Expected SHA256 of corecrypto.zip (empty = skip integrity check)'
+        required: false
+        default: 'b0f72ee1235ba791c302922c28be141a4806f7e13d1a1958a51f139d35ad64a9'
+  push:
+    branches: [main]
+    paths:
+      - 'images/builder/**'
+      - '.github/workflows/build-builder.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/altserver-builder-alpine-amd64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          tags="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tags="$tags,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
+          else
+            tags="$tags,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-main"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: images/builder
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            IMAGE=amd64/alpine:3.15
+            CPPRESTSDK_REF=${{ github.event.inputs.cpprestsdk_ref || '122d09549201da5383321d870bed45ecb9e168c5' }}
+            LIBZIP_REF=${{ github.event.inputs.libzip_ref || '26ba5523db09213f532821875542dba7afa04b65' }}
+            CORECRYPTO_SHA256=${{ github.event.inputs.corecrypto_sha256 || 'b0f72ee1235ba791c302922c28be141a4806f7e13d1a1958a51f139d35ad64a9' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
