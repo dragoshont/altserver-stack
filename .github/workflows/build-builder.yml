@@ -67,11 +67,9 @@ jobs:
       - name: Compute tags
         id: tags
         run: |
-          tags="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          tags="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-main"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tags="$tags,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
-          else
-            tags="$tags,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-main"
           fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
