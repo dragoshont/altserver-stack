@@ -55,22 +55,53 @@ RUN mkdir /buildenv
 
 WORKDIR /buildenv
 
-# --- Apple corecrypto (live zip, optional integrity guard) ------------------
-# Apple serves this with no version handle and silently revs it: the zip used to
-# extract to corecrypto/ but now lands as corecrypto-2024/ (plus __MACOSX/ junk).
-# Normalize whatever versioned top-level dir Apple ships into a stable
-# /buildenv/corecrypto so the rest of the build is independent of Apple's naming.
-# corecrypto-2024's CMakeLists.txt also does `include(scripts/code-coverage.cmake)`
-# — a StableCoder helper Apple references but does NOT ship. It only feeds the
-# default-off CODE_COVERAGE option, so strip the include (and the add/target_
-# code_coverage calls) so configure succeeds without coverage instrumentation.
-# Apple's generated CoreCryptoSources.cmake also lists ccrng_static.c under a
-# corecrypto_static/ subdir that the public zip does NOT ship (the file is at the
-# tree root) — rewrite that one path so add_library(corecrypto_static) resolves.
-RUN curl -JL -o corecrypto.zip "${CORECRYPTO_URL}" -H 'Referer: https://developer.apple.com/security/' \
+# --- Apple corecrypto (download-not-deliver, cacheable, BYO-able) -----------
+# corecrypto is Apple SOURCE (not a prebuilt binary): we COMPILE it here into a
+# static archive that the engine later links. Apple's *corecrypto Internal Use
+# License* forbids redistributing the source, so we never commit/ship the zip —
+# it is fetched from developer.apple.com at build time, and whoever runs this
+# build accepts Apple's terms by doing so.
+#
+# Acquisition order (check-then-download):
+#   1. If images/builder/vendor/corecrypto.zip is present in the build context
+#      (COPYed to /vendor below), use it — this is "bring your own corecrypto"
+#      for users who downloaded it from Apple themselves and do NOT want this
+#      build calling developer.apple.com. Works with plain `docker build`.
+#   2. Else if /cccache/corecrypto.zip exists (a BuildKit cache mount that
+#      persists across local rebuilds), use it — no re-download.
+#   3. Otherwise download from Apple and save a copy back into /cccache so the
+#      next build skips the download.
+# The integrity guard (CORECRYPTO_SHA256) is applied to ALL paths, so a stale,
+# substituted, or BYO zip fails just as loudly as a drifted Apple download.
+#
+# Layout fix-ups (Apple silently revs this with no version handle): the zip used
+# to extract to corecrypto/ but now lands as corecrypto-2024/ (plus __MACOSX/
+# junk) — normalize whatever versioned top-level dir ships into a stable
+# /buildenv/corecrypto. Its CMakeLists.txt also `include(scripts/code-coverage.cmake)`
+# — a StableCoder helper Apple references but does NOT ship; it only feeds the
+# default-off CODE_COVERAGE option, so strip the include + add/target_code_coverage
+# calls. Apple's generated CoreCryptoSources.cmake lists ccrng_static.c under a
+# corecrypto_static/ subdir the public zip does NOT ship (the file is at the tree
+# root) — rewrite that one path so add_library(corecrypto_static) resolves.
+#
+# vendor/ always exists (it has a README) so this COPY never fails; a user's
+# BYO corecrypto.zip dropped in there is .gitignored and never committed.
+COPY vendor/ /vendor/
+RUN --mount=type=cache,target=/cccache,sharing=locked \
+    if [ -f /vendor/corecrypto.zip ]; then \
+        echo "== using bring-your-own corecrypto.zip from build context /vendor (no Apple download) =="; \
+        cp /vendor/corecrypto.zip corecrypto.zip; \
+    elif [ -f /cccache/corecrypto.zip ]; then \
+        echo "== using cached corecrypto.zip from /cccache (no Apple download) =="; \
+        cp /cccache/corecrypto.zip corecrypto.zip; \
+    else \
+        echo "== no vendored/cached corecrypto.zip — downloading from Apple (by doing so you accept Apple's corecrypto Internal Use License) =="; \
+        curl -JL -o corecrypto.zip "${CORECRYPTO_URL}" -H 'Referer: https://developer.apple.com/security/' \
+        && cp corecrypto.zip /cccache/corecrypto.zip; \
+    fi \
  && if [ -n "${CORECRYPTO_SHA256}" ]; then \
         echo "${CORECRYPTO_SHA256}  corecrypto.zip" | sha256sum -c - \
-        || { echo "ERROR: corecrypto.zip digest != pinned CORECRYPTO_SHA256"; exit 1; }; \
+        || { echo "ERROR: corecrypto.zip digest != pinned CORECRYPTO_SHA256 — delete the cached copy (/cccache/corecrypto.zip), fix vendor/corecrypto.zip, or pass a new CORECRYPTO_SHA256"; exit 1; }; \
     else \
         echo "WARN: CORECRYPTO_SHA256 not set — skipping corecrypto integrity check"; sha256sum corecrypto.zip; \
     fi \

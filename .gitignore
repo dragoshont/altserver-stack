@@ -3,3 +3,7 @@
 build/
 dist/
 .DS_Store
+
+# BYO Apple corecrypto (never commit — Apple no-redistribution)
+images/builder/vendor/*.zip
+.corecrypto-cache/

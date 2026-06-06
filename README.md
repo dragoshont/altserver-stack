@@ -126,6 +126,32 @@ it deliberately via build-arg / workflow input when adopting a new drop.
 The builder rarely changes; the engine consumes `builder:latest-main` as its
 `BUILDER_IMAGE`. After a builder rebuild, re-run the engine workflow to relink.
 
+### Build locally (clean-room / bring-your-own corecrypto)
+
+The published engine image is a convenience build that **statically links
+compiled Apple corecrypto**. If you'd rather be the one who fetches corecrypto
+(and accepts Apple's terms), or you want to avoid this build reaching out to
+Apple at all, build it yourself:
+
+```bash
+./build.sh        # builds altserver-builder-alpine-amd64:local + altserver-linux:local
+docker run --rm -v "$PWD/out:/dest" altserver-linux:local extract
+```
+
+corecrypto acquisition is **check-then-download**, in this order:
+
+1. **Bring your own** — drop your Apple `corecrypto.zip` at
+   `images/builder/vendor/corecrypto.zip` and the build uses it with **no call to
+   `developer.apple.com`**. It's `.gitignored` and never committed.
+2. **Cached** — a BuildKit cache mount keeps the downloaded zip so repeat local
+   builds skip the download.
+3. **Download** — otherwise the builder fetches it from Apple (you thereby accept
+   Apple's corecrypto Internal Use License).
+
+The `CORECRYPTO_SHA256` integrity guard is applied to **all three** paths, so a
+stale, substituted, or BYO zip fails just as loudly as a drifted Apple download.
+
+
 All pins are overridable build-args / `workflow_dispatch` inputs so you can test
 a dependency bump without editing the Dockerfile.
 
