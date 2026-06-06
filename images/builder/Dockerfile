@@ -65,6 +65,7 @@ RUN git clone "${LIBGSA_REPO}" libgsa \
  && cmake -S libgsa -B libgsa/build -DCMAKE_BUILD_TYPE=Release -DGSA_BUILD_TESTS=OFF \
  && cmake --build libgsa/build -j"$(nproc)" \
  && install -m 0644 libgsa/build/libgsa.a /usr/local/lib/libgsa.a \
+ && mkdir -p /usr/local/include \
  && cp -a libgsa/include/gsa /usr/local/include/gsa \
  && echo "== libgsa installed ==" && ls -l /usr/local/lib/libgsa.a /usr/local/include/gsa
 
