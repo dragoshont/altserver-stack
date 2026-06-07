@@ -91,7 +91,10 @@ FROM ${BUILDER_IMAGE} AS altserver-build
 # dragoshont/AltSign-Linux (now the libgsa port), so `submodule update` never
 # touches NyaMisty and the signer's GrandSlam auth links libgsa, not corecrypto.
 ARG ALTSERVER_REPO=https://github.com/dragoshont/AltServer-Linux
-ARG ALTSERVER_REF=970efbab65976f65fb5daf3fc0392a387a3a049a
+# be6f328: anisette server overridable via ALTSERVER_ANISETTE_SERVER (point at
+# the self-hosted anisette-v3-server flat GET /; armconverter.com default when
+# unset). Frees the signer from the flaky public armconverter.com anisette.
+ARG ALTSERVER_REF=be6f32809e85a7820ff893e28d512bb31d8ce5c6
 
 RUN apk add --no-cache git make g++ python3
 
