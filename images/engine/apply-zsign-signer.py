@@ -80,6 +80,27 @@ REPLACEMENT = r"""std::string key = CertificatesContent(this->certificate());
 INCLUDE_ANCHOR = '#include "Archiver.hpp"'
 INCLUDE_INJECT = '#include "Archiver.hpp"\n\n#include <cstdlib>   // std::system, getenv\n#include <cstring>   // strlen\n#include <system_error>'
 
+# ---- zsign-readable p12 cipher fix -----------------------------------------
+# CertificatesContent() builds the cert-chain + key p12 we hand to zsign via
+# `PKCS12_create(pass, name, pkey, cert, ca, nid_key, nid_cert, iter, mac, kt)`.
+# Upstream passes nid_key=0/nid_cert=0, which under OpenSSL 3 means the DEFAULT
+# PKCS#12 ciphers: 3DES (key bag) + 40-bit RC2 (cert bag) -- both live only in
+# OpenSSL 3's *legacy* provider. The signing zsign is a fully static binary and
+# cannot dlopen legacy.so ("Dynamic loading not supported"), so it fails to load
+# the p12 ("Can't load p12 or private key file", RC2-40-CBC unsupported) and the
+# app ships unsigned (device install -> 0xe800801c "No code signature found").
+# Passing a CIPHER nid (NID_aes_256_cbc) makes OpenSSL 3 emit PBES2/PBKDF2/AES-
+# 256-CBC for both bags -- readable by the static zsign's default provider.
+# NID_aes_256_cbc is available transitively via <openssl/pkcs12.h>.
+PKCS12_CIPHER_MARKER = (
+    "PKCS12_create(emptyString, emptyString, key, certificate, "
+    "certificates, 0, 0, 0, 0, 0)"
+)
+PKCS12_CIPHER_REPLACEMENT = (
+    "PKCS12_create(emptyString, emptyString, key, certificate, "
+    "certificates, NID_aes_256_cbc, NID_aes_256_cbc, 0, 0, 0)"
+)
+
 
 def main() -> int:
     if len(sys.argv) != 2:
@@ -112,6 +133,16 @@ def main() -> int:
             print(f"[apply-zsign-signer] ERROR: include anchor not found in {path}", file=sys.stderr)
             return 1
         patched = patched.replace(INCLUDE_ANCHOR, INCLUDE_INJECT, 1)
+
+    # Re-encode the signing p12 with AES so the static zsign can decrypt it.
+    if PKCS12_CIPHER_MARKER in patched:
+        patched = patched.replace(PKCS12_CIPHER_MARKER, PKCS12_CIPHER_REPLACEMENT, 1)
+        print(f"[apply-zsign-signer] patched {path}: p12 cipher -> AES-256-CBC (zsign-readable)")
+    elif PKCS12_CIPHER_REPLACEMENT in patched:
+        print(f"[apply-zsign-signer] p12 cipher already AES-256-CBC: {path}")
+    else:
+        print(f"[apply-zsign-signer] ERROR: PKCS12_create cipher marker not found in {path}", file=sys.stderr)
+        return 1
 
     path.write_text(patched)
     print(f"[apply-zsign-signer] patched {path}: ldid::Sign -> zsign delegation")
